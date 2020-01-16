@@ -5,7 +5,17 @@ import java.util.Map;
 import javax.xml.datatype.DatatypeConfigurationException;
 import javax.xml.datatype.DatatypeFactory;
 import javax.xml.datatype.XMLGregorianCalendar;
+import javax.xml.namespace.QName;
 
+import com.sun.codemodel.JExpression;
+import com.sun.tools.xjc.model.CAdapter;
+import com.sun.tools.xjc.model.CClassInfo;
+import com.sun.tools.xjc.model.CNonElement;
+import com.sun.tools.xjc.model.CTypeRef;
+import com.sun.tools.xjc.model.TypeUse;
+import com.sun.tools.xjc.outline.Aspect;
+import com.sun.tools.xjc.reader.xmlschema.BGMBuilder;
+import com.sun.xml.xsom.XmlString;
 import org.xml.sax.ErrorHandler;
 
 import com.sun.codemodel.ClassType;
@@ -55,7 +65,7 @@ import com.sun.xml.xsom.XSTerm;
  * Created: Mon Apr 24 22:04:25 2006
  *
  * @author <a href="mailto:hari@dcis.net">Hari Selvarajan</a>
- * @author <a href="mailto:Juergen.Lukasczyk at web.de">Jürgen Lukasczyk</a>
+ * @author <a href="mailto:Juergen.Lukasczyk at web.de">Jï¿½rgen Lukasczyk</a>
  * @version 1.1
  */
 public class DefaultValuePlugin
@@ -148,109 +158,124 @@ public class DefaultValuePlugin
 
 				// Handle primitive types via boxed representation (treat boolean as java.lang.Boolean)
 				JType type = f.getRawType();
-				if (type.isPrimitive())
-					type = type.boxify();
-				String typeFullName = type.fullName();
-				
-				// Create an appropriate default expression depending on type
-				if ("java.lang.String".equals(typeFullName)) {
-					var.init(JExpr.lit(defaultValue));
-					if (opt.verbose)
-						System.out.println("[INFO] Initializing String variable "
-							+fieldInfo.displayName()
-							+" to \""+defaultValue+"\"");
-				}
-				
-				else if ("java.lang.Boolean".equals(typeFullName)) {
-					var.init(JExpr.lit(Boolean.valueOf(defaultValue)));
-					if (opt.verbose)
-						System.out.println("[INFO] Initializing Boolean variable "
-							+fieldInfo.displayName()
-							+" to "+defaultValue+"");
-				}
-				
-				else if ( ("java.lang.Byte".equals(typeFullName))
-					|| ("java.lang.Short".equals(typeFullName))
-					|| ("java.lang.Integer".equals(typeFullName))
-				) {
-					// CodeModel does not distinguish between Byte, Short and Integer literals
-					var.init(JExpr.lit(Integer.valueOf(defaultValue)));
-					if (opt.verbose)
-						System.out.println("[INFO] Initializing Integer variable "
-							+fieldInfo.displayName()
-							+" to "+defaultValue+"");
-				}
-				
-				else if ("java.lang.Long".equals(typeFullName)) {
-					var.init(JExpr.lit(Long.valueOf(defaultValue)));
-					if (opt.verbose)
-						System.out.println("[INFO] Initializing Long variable "
-							+fieldInfo.displayName()
-							+" to "+defaultValue+"");
-				}
-				
-				else if ("java.lang.Float".equals(typeFullName)) {
-					var.init(JExpr.lit(Float.valueOf(defaultValue)));
-					if (opt.verbose)
-						System.out.println("[INFO] Initializing Float variable "
-							+fieldInfo.displayName()
-							+" to "+defaultValue+"");
-				} 
-				
-				else if ( ("java.lang.Single".equals(typeFullName))
-					|| ("java.lang.Double".equals(typeFullName))
-				) {
-					// CodeModel does not distinguish between Single and Double literals
-					var.init(JExpr.lit(Double.valueOf(defaultValue)));
-					if (opt.verbose)
-						System.out.println("[INFO] Initializing Double variable "
-							+fieldInfo.displayName()
-							+" to "+defaultValue+"");
-				}
-				
-				else if ("javax.xml.datatype.XMLGregorianCalendar".equals(typeFullName)) {
-					// XMLGregorianCalender is constructed by DatatypeFactory, so we have to have
-					// an instance of that once per class
-					if (dtf == null) {
-						dtf = installDtF(co.implClass);
-						if (dtf == null)  continue;
-					}
-					// Use our DtF instance to generate the initialization expression
-					var.init(JExpr.invoke(dtf, "newXMLGregorianCalendar")
-						.arg(defaultValue));
-					if (opt.verbose)
-						System.out.println("[INFO] Initializing XMLGregorianCalendar variable "
-							+fieldInfo.displayName()
-							+" with value of "+defaultValue);
-				}
-				
-				else if ( (type instanceof JDefinedClass) 
-					&& (((JDefinedClass) type).getClassType() == ClassType.ENUM) ) {
-					// Find Enum constant
-					JEnumConstant constant = findEnumConstant(type, defaultValue, outline);					
-					if (constant != null) {
-						var.init(constant);
-						if (opt.verbose)
-							System.out.println("[INFO] Initializing enum variable "
-								+ fieldInfo.displayName() + " with constant " + constant.getName());
-					}
-				}
-				
-				// Don't know how to create default for this type
-				else {
-					System.out.println("[WARN] Did not create default value for field "
-						+ fieldInfo.displayName()
-						+ ". Don't know how to create default value expression for fields of type "
-						+ typeFullName
-						+ ". Default value of \""+defaultValue+"\" specified in schema"
-						);
-				}
+				assignDefaultValue(opt, co, fieldInfo, type, var, element);
 				
 			} // for FieldOutline
 			
 		} // for ClassOutline
 
 		return true;
+	}
+
+	private void assignDefaultValue(Options opt, ClassOutline co, CPropertyInfo fieldInfo, JType type, JVar var, XSElementDecl element) {
+		String defaultValue = element.getDefaultValue().value;
+
+		if (type.isPrimitive())
+			type = type.boxify();
+		String typeFullName = type.fullName();
+
+		// Create an appropriate default expression depending on type
+		if ("java.lang.String".equals(typeFullName)) {
+			var.init(JExpr.lit(defaultValue));
+			if (opt.verbose)
+				System.out.println("[INFO] Initializing String variable "
+						+fieldInfo.displayName()
+						+" to \""+defaultValue+"\"");
+		}
+
+		else if ("java.lang.Boolean".equals(typeFullName)) {
+			var.init(JExpr.lit(Boolean.valueOf(defaultValue)));
+			if (opt.verbose)
+				System.out.println("[INFO] Initializing Boolean variable "
+						+fieldInfo.displayName()
+						+" to "+defaultValue+"");
+		}
+
+		else if ( ("java.lang.Byte".equals(typeFullName))
+				|| ("java.lang.Short".equals(typeFullName))
+				|| ("java.lang.Integer".equals(typeFullName))
+		) {
+			// CodeModel does not distinguish between Bydte, Short and Integer literals
+			var.init(JExpr.lit(Integer.valueOf(defaultValue)));
+			if (opt.verbose)
+				System.out.println("[INFO] Initializing Integer variable "
+						+fieldInfo.displayName()
+						+" to "+defaultValue+"");
+		}
+
+		else if ("java.lang.Long".equals(typeFullName)) {
+			var.init(JExpr.lit(Long.valueOf(defaultValue)));
+			if (opt.verbose)
+				System.out.println("[INFO] Initializing Long variable "
+						+fieldInfo.displayName()
+						+" to "+defaultValue+"");
+		}
+
+		else if ("java.lang.Float".equals(typeFullName)) {
+			var.init(JExpr.lit(Float.valueOf(defaultValue)));
+			if (opt.verbose)
+				System.out.println("[INFO] Initializing Float variable "
+						+fieldInfo.displayName()
+						+" to "+defaultValue+"");
+		}
+
+		else if ( ("java.lang.Single".equals(typeFullName))
+				|| ("java.lang.Double".equals(typeFullName))
+		) {
+			// CodeModel does not distinguish between Single and Double literals
+			var.init(JExpr.lit(Double.valueOf(defaultValue)));
+			if (opt.verbose)
+				System.out.println("[INFO] Initializing Double variable "
+						+fieldInfo.displayName()
+						+" to "+defaultValue+"");
+		}
+
+		else if ("javax.xml.datatype.XMLGregorianCalendar".equals(typeFullName)) {
+			// XMLGregorianCalender is constructed by DatatypeFactory, so we have to have
+			// Use our DtF instance to generate the initialization expression
+			var.init(JExpr.invoke(installDtF(co.implClass), "newXMLGregorianCalendar")
+					.arg(defaultValue));
+			if (opt.verbose)
+				System.out.println("[INFO] Initializing XMLGregorianCalendar variable "
+						+fieldInfo.displayName()
+						+" with value of "+defaultValue);
+		}
+
+		else if ( (type instanceof JDefinedClass)
+				&& (((JDefinedClass) type).getClassType() == ClassType.ENUM) ) {
+			// Find Enum constant
+			JEnumConstant constant = findEnumConstant(type, defaultValue, co.parent());
+			if (constant != null) {
+				var.init(constant);
+				if (opt.verbose)
+					System.out.println("[INFO] Initializing enum variable "
+							+ fieldInfo.displayName() + " with constant " + constant.getName());
+			}
+		}
+
+		else if (fieldInfo.getAdapter() != null ) {
+			JCodeModel codeModel = co.parent().getCodeModel();
+			JTryBlock jTryBlock = co.implClass.instanceInit()._try();
+			QName simpleTypeName = BGMBuilder.getName(element.getType());
+			TypeUse typeUse = co.parent().getModel().typeUses().get(simpleTypeName);
+			JType innerType = typeUse.getInfo().toType(co.parent(), Aspect.EXPOSED);
+			JVar innerVar = jTryBlock.body().decl(innerType, "_" + var.name());
+			assignDefaultValue(opt, co, fieldInfo, innerType, innerVar, element);
+			jTryBlock.body().assign(var, JExpr._new(fieldInfo.getAdapter().getAdapterClass(co.parent())).invoke("unmarshal").arg(innerVar));
+			JCatchBlock jCatchBlock = jTryBlock._catch(codeModel.ref(Exception.class));
+			JVar jVar = jCatchBlock.param("e");
+			jCatchBlock.body()._throw(JExpr._new(codeModel.ref(RuntimeException.class)).arg(jVar));
+		}
+
+		// Don't know how to create default for this type
+		else {
+			System.out.println("[WARN] Did not create default value for field "
+					+ fieldInfo.displayName()
+					+ ". Don't know how to create default value expression for fields of type "
+					+ typeFullName
+					+ ". Default value of \""+defaultValue+"\" specified in schema"
+			);
+		}
 	}
 	
 	
@@ -293,6 +318,10 @@ public class DefaultValuePlugin
 	 */
 	private JFieldVar installDtF(final JDefinedClass parentClass)
 	{
+		JFieldVar existingField = parentClass.fields().get("DATATYPE_FACTORY");
+		if (existingField != null) {
+			return existingField;
+		}
 		try {
 			JCodeModel cm = parentClass.owner();
 			// Create a static variable of type DatatypeFactory
